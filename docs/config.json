@@ -1,0 +1,15 @@
+{
+    "serve_path": "/home/robit/Documents/repositories/orb-slam-ar-three/docs",
+    "extra_dns_sans": [],
+    "cert_mode": "self",
+    "domains": [],
+    "email": "",
+    "le_staging": false,
+    "stepca_url": "",
+    "stepca_fingerprint": "",
+    "stepca_provisioner": "",
+    "stepca_token": "",
+    "gcpca_pool": "",
+    "gcpca_location": "",
+    "gcpca_cert_id": ""
+}

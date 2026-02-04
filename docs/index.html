@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <title>AlvaAR SLAM Playground</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+  <link rel="icon" type="image/png" href="data:image/png;base64,iVBORw0KGgo=" />
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.132.2/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.132.2/examples/jsm/"
+    }
+  }
+  </script>
+  <style>
+    :root {
+      --bg-0: #0a0c10;
+      --bg-1: #121621;
+      --ink: #e7ecf4;
+      --muted: #9aa7bd;
+      --panel: rgba(13, 17, 27, 0.7);
+      --panel-border: rgba(255, 255, 255, 0.08);
+      --glow: rgba(79, 209, 197, 0.35);
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    html, body {
+      width: 100%;
+      min-height: 100%;
+      font-family: "Space Grotesk", sans-serif;
+      background: radial-gradient(circle at 10% 10%, rgba(79, 209, 197, 0.15), transparent 45%),
+                  radial-gradient(circle at 90% 20%, rgba(247, 178, 103, 0.12), transparent 40%),
+                  linear-gradient(160deg, var(--bg-0), var(--bg-1));
+      color: var(--ink);
+      overflow-y: auto;
+    }
+
+    #app {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      min-height: 100vh;
+    }
+
+    .panel {
+      position: relative;
+      border-radius: 18px;
+      background: var(--panel);
+      border: 1px solid var(--panel-border);
+      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.4);
+      overflow: hidden;
+    }
+
+    .label {
+      position: absolute;
+      top: 14px;
+      left: 16px;
+      padding: 6px 10px;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.14em;
+      color: var(--muted);
+      background: rgba(8, 10, 14, 0.7);
+      border-radius: 999px;
+      z-index: 5;
+    }
+
+    #controls {
+      padding: 16px;
+      display: grid;
+      gap: 12px;
+    }
+
+    .controls-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+    }
+
+    #controls button {
+      font-family: "Space Grotesk", sans-serif;
+      font-size: 12px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      padding: 8px 14px;
+      border-radius: 999px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      color: var(--ink);
+      background: linear-gradient(140deg, rgba(79, 209, 197, 0.35), rgba(79, 209, 197, 0.1));
+      cursor: pointer;
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    #controls button:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+      box-shadow: none;
+    }
+
+    .toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: rgba(8, 10, 14, 0.65);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .status-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+    }
+
+    #status {
+      padding: 8px 12px;
+      border-radius: 10px;
+      background: rgba(8, 10, 14, 0.8);
+      border: 1px solid rgba(79, 209, 197, 0.35);
+      font-size: 12px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--ink);
+    }
+
+    #stats .stats-box {
+      font-family: "Space Mono", monospace;
+      font-size: 11px;
+      color: var(--ink);
+      background: rgba(8, 10, 14, 0.8);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      padding: 8px 10px;
+      border-radius: 10px;
+      white-space: pre-line;
+    }
+
+    #camera-panel {
+      padding: 16px;
+    }
+
+    #camera-canvas {
+      width: 100%;
+      height: auto;
+      display: block;
+      border-radius: 12px;
+      background: #000;
+    }
+
+    #map-panel {
+      height: 70vh;
+      min-height: 420px;
+    }
+
+    #map-three {
+      position: absolute;
+      inset: 0;
+    }
+
+    @media (max-width: 900px) {
+      #app {
+        padding: 16px;
+      }
+
+      #map-panel {
+        height: 60vh;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <header id="controls" class="panel">
+      <div class="controls-row">
+        <button id="start">Start</button>
+        <button id="reset" disabled>Reset</button>
+        <label class="toggle"><input type="checkbox" id="imu-toggle" checked> IMU Fusion</label>
+      </div>
+      <div class="status-row">
+        <div id="status">Awaiting start</div>
+        <div id="stats"></div>
+      </div>
+    </header>
+
+    <section id="camera-panel" class="panel">
+      <div class="label">Camera Frame + Points</div>
+      <canvas id="camera-canvas"></canvas>
+    </section>
+
+    <section id="map-panel" class="panel">
+      <div class="label">World View</div>
+      <div id="map-three"></div>
+    </section>
+  </div>
+
+  <script type="module" src="./script.js"></script>
+</body>
+</html>
