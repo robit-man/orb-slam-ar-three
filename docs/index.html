@@ -2,13 +2,14 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <meta http-equiv="X-UA-Compatible" content="IE=edge" />
   <title>AlvaAR SLAM Playground</title>
+
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
-  <link rel="icon" type="image/png" href="data:image/png;base64,iVBORw0KGgo=" />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+
   <script type="importmap">
   {
     "imports": {
@@ -17,201 +18,218 @@
     }
   }
   </script>
+
   <style>
-    :root {
-      --bg-0: #0a0c10;
-      --bg-1: #121621;
-      --ink: #e7ecf4;
-      --muted: #9aa7bd;
-      --panel: rgba(13, 17, 27, 0.7);
-      --panel-border: rgba(255, 255, 255, 0.08);
-      --glow: rgba(79, 209, 197, 0.35);
+    :root{
+      --bg:#000;
+      --fg:#fff;
+      --muted:rgba(255,255,255,.7);
+      --line:rgba(255,255,255,.14);
+      --card:rgba(0,0,0,.65);
+      --accent:#ffae00;
+      --pill:rgba(255,255,255,.07);
+      --pill2:rgba(255,174,0,.16);
+      --shadow: 0 10px 40px rgba(0,0,0,.5);
+      --mono: "Space Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
     }
-
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
-
     html, body {
-      width: 100%;
-      min-height: 100%;
-      font-family: "Space Grotesk", sans-serif;
-      background: radial-gradient(circle at 10% 10%, rgba(79, 209, 197, 0.15), transparent 45%),
-                  radial-gradient(circle at 90% 20%, rgba(247, 178, 103, 0.12), transparent 40%),
-                  linear-gradient(160deg, var(--bg-0), var(--bg-1));
-      color: var(--ink);
-      overflow-y: auto;
+      margin: 0;
+      height: 100%;
+      overflow: hidden;
+      background: var(--bg);
+      color: var(--fg);
+      font-family: var(--mono);
     }
-
     #app {
-      max-width: 1200px;
-      margin: 0 auto;
-      padding: 24px;
+      position: fixed;
+      inset: 0;
+    }
+    canvas { display:block; width:100%; height:100%; }
+
+    #menu {
+      position: fixed;
+      left: calc(env(safe-area-inset-left) + 10px);
+      top:  calc(env(safe-area-inset-top) + 10px);
+      z-index: 10;
+      pointer-events: auto;
       display: flex;
       flex-direction: column;
-      gap: 20px;
-      min-height: 100vh;
+      gap: 8px;
+      max-width: min(520px, calc(100vw - 20px));
+      user-select: none;
     }
-
-    .panel {
-      position: relative;
-      border-radius: 18px;
-      background: var(--panel);
-      border: 1px solid var(--panel-border);
-      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.4);
-      overflow: hidden;
-    }
-
-    .label {
-      position: absolute;
-      top: 14px;
-      left: 16px;
-      padding: 6px 10px;
+    .row { display:flex; gap:8px; align-items:center; flex-wrap: wrap; }
+    .btn {
+      appearance: none;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.06);
+      color: var(--fg);
+      padding: 9px 10px;
+      border-radius: 10px;
+      font-family: var(--mono);
       font-size: 12px;
-      text-transform: uppercase;
-      letter-spacing: 0.14em;
-      color: var(--muted);
-      background: rgba(8, 10, 14, 0.7);
-      border-radius: 999px;
-      z-index: 5;
-    }
-
-    #controls {
-      padding: 16px;
-      display: grid;
-      gap: 12px;
-    }
-
-    .controls-row {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 12px;
-      align-items: center;
-    }
-
-    #controls button {
-      font-family: "Space Grotesk", sans-serif;
-      font-size: 12px;
-      letter-spacing: 0.1em;
-      text-transform: uppercase;
-      padding: 8px 14px;
-      border-radius: 999px;
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      color: var(--ink);
-      background: linear-gradient(140deg, rgba(79, 209, 197, 0.35), rgba(79, 209, 197, 0.1));
+      letter-spacing: .2px;
       cursor: pointer;
-      transition: transform 0.2s ease, box-shadow 0.2s ease;
+      box-shadow: var(--shadow);
     }
-
-    #controls button:disabled {
-      opacity: 0.4;
+    .btn:active { transform: translateY(1px); }
+    .btn.accent {
+      border-color: rgba(255,174,0,.55);
+      background: rgba(255,174,0,.14);
+      color: var(--fg);
+    }
+    .btn:disabled {
+      opacity: 0.45;
       cursor: not-allowed;
-      box-shadow: none;
     }
-
+    #panel {
+      backdrop-filter: blur(10px);
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 10px;
+      box-shadow: var(--shadow);
+    }
+    .module {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 8px;
+      background: rgba(255,255,255,.03);
+      margin-bottom: 8px;
+    }
+    .module:last-child { margin-bottom: 0; }
+    .moduleTitle{
+      font-size: 11px;
+      color: var(--muted);
+      margin-bottom: 6px;
+      letter-spacing: .3px;
+      display:flex;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .pillbox{ display:flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+    .pill{
+      font-size: 11px;
+      padding: 4px 6px;
+      border-radius: 4px;
+      border: 1px solid rgba(255,255,255,.12);
+      background: var(--pill);
+      white-space: nowrap;
+    }
+    .pill.accent{ border-color: rgba(255,174,0,.55); background: var(--pill2); }
     .toggle {
       display: inline-flex;
       align-items: center;
       gap: 8px;
-      font-size: 12px;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      color: var(--muted);
-      padding: 6px 10px;
-      border-radius: 999px;
-      background: rgba(8, 10, 14, 0.65);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-    }
-
-    .status-row {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 12px;
-      align-items: center;
-    }
-
-    #status {
-      padding: 8px 12px;
-      border-radius: 10px;
-      background: rgba(8, 10, 14, 0.8);
-      border: 1px solid rgba(79, 209, 197, 0.35);
-      font-size: 12px;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      color: var(--ink);
-    }
-
-    #stats .stats-box {
-      font-family: "Space Mono", monospace;
       font-size: 11px;
-      color: var(--ink);
-      background: rgba(8, 10, 14, 0.8);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      padding: 8px 10px;
-      border-radius: 10px;
-      white-space: pre-line;
+      padding: 4px 6px;
+      border-radius: 4px;
+      border: 1px solid rgba(255,255,255,.12);
+      background: var(--pill);
+      color: var(--fg);
     }
+    .toggle input { margin: 0; }
+    .tiny { font-size: 11px; line-height: 1.25; }
+    .muted { color: var(--muted); }
 
-    #camera-panel {
-      padding: 16px;
+    #pip {
+      position: fixed;
+      right: calc(env(safe-area-inset-right) + 12px);
+      bottom: calc(env(safe-area-inset-bottom) + 12px);
+      width: min(320px, 42vw);
+      aspect-ratio: 16 / 9;
+      border-radius: 12px;
+      overflow: hidden;
+      background: rgba(0,0,0,0.7);
+      border: 1px solid rgba(255,255,255,0.12);
+      box-shadow: var(--shadow);
+      z-index: 8;
+      pointer-events: none;
     }
-
+    #pipLabel {
+      position: absolute;
+      left: 8px;
+      top: 6px;
+      z-index: 2;
+      font-size: 11px;
+      color: var(--muted);
+      background: rgba(0,0,0,0.45);
+      padding: 2px 6px;
+      border-radius: 6px;
+      border: 1px solid rgba(255,255,255,0.1);
+    }
     #camera-canvas {
       width: 100%;
-      height: auto;
+      height: 100%;
       display: block;
-      border-radius: 12px;
       background: #000;
     }
 
-    #map-panel {
-      height: 70vh;
-      min-height: 420px;
-    }
-
-    #map-three {
-      position: absolute;
-      inset: 0;
-    }
-
-    @media (max-width: 900px) {
-      #app {
-        padding: 16px;
-      }
-
-      #map-panel {
-        height: 60vh;
-      }
+    @media (max-width: 720px) {
+      #pip { width: min(240px, 55vw); }
     }
   </style>
 </head>
 <body>
   <div id="app">
-    <header id="controls" class="panel">
-      <div class="controls-row">
-        <button id="start">Start</button>
-        <button id="reset" disabled>Reset</button>
-        <label class="toggle"><input type="checkbox" id="imu-toggle" checked> IMU Fusion</label>
-      </div>
-      <div class="status-row">
-        <div id="status">Awaiting start</div>
-        <div id="stats"></div>
-      </div>
-    </header>
-
-    <section id="camera-panel" class="panel">
-      <div class="label">Camera Frame + Points</div>
-      <canvas id="camera-canvas"></canvas>
-    </section>
-
-    <section id="map-panel" class="panel">
-      <div class="label">World View</div>
-      <div id="map-three"></div>
-    </section>
+    <canvas id="three-canvas"></canvas>
   </div>
 
-  <script type="module" src="./script.js"></script>
+  <div id="menu">
+    <div class="row">
+      <button id="startBtn" class="btn accent">Start</button>
+      <button id="stopBtn" class="btn" disabled>Stop</button>
+      <button id="resetBtn" class="btn" disabled>Reset</button>
+      <button id="viewBtn" class="btn" title="Toggle first-person view">First-person</button>
+    </div>
+
+    <div id="panel">
+      <div class="module">
+        <div class="moduleTitle"><span>Controls</span><span class="muted">SLAM + IMU</span></div>
+        <div class="row">
+          <label class="toggle"><input type="checkbox" id="imuToggle" checked> IMU Fusion</label>
+          <button id="sphereBtn" class="btn" title="Toggle plane/sphere projection">Project to sphere</button>
+          <button id="pickBtn" class="btn" title="Pick an anchor point on the globe">Pick anchor</button>
+          <button id="gpsBtn" class="btn" title="Use GPS to set anchor">Use GPS</button>
+        </div>
+        <div class="tiny muted" style="margin-top:6px;">
+          Sphere mode: up = (center → point). North = +Y pole projected to tangent plane.
+        </div>
+      </div>
+
+      <div class="module">
+        <div class="moduleTitle"><span>Yaw</span><span class="muted">manual calibration</span></div>
+        <div class="row">
+          <button id="calBtn" class="btn" title="Align yaw to compass heading">Calibrate</button>
+          <button id="calResetBtn" class="btn" title="Clear yaw offset">Reset Yaw</button>
+        </div>
+        <div class="tiny muted" style="margin-top:6px;">
+          Calibrate once to align to compass, then continue on IMU only.
+        </div>
+      </div>
+
+      <div class="module">
+        <div class="moduleTitle"><span>Status</span><span class="muted">live</span></div>
+        <div class="pillbox">
+          <span class="pill accent" id="status">Idle</span>
+          <span class="pill" id="imuStatus">IMU: off</span>
+          <span class="pill" id="fps">FPS: -</span>
+          <span class="pill" id="pts2d">2D: -</span>
+          <span class="pill" id="pts3d">3D: -</span>
+        </div>
+      </div>
+
+      <div class="tiny muted" style="margin-top:8px;">
+        Camera + motion require HTTPS and user permission on mobile.
+      </div>
+    </div>
+  </div>
+
+  <div id="pip">
+    <div id="pipLabel">Camera</div>
+    <canvas id="camera-canvas"></canvas>
+  </div>
+
+  <script type="module" src="script.js"></script>
 </body>
 </html>
