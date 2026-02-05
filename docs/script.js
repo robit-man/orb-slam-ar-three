@@ -18,6 +18,7 @@ const VIDEO_CONSTRAINTS = {
 };
 
 const dom = {
+  menuBtn: document.getElementById('menuBtn'),
   startBtn: document.getElementById('startBtn'),
   stopBtn: document.getElementById('stopBtn'),
   resetBtn: document.getElementById('resetBtn'),
@@ -38,6 +39,21 @@ const dom = {
 };
 
 const applyPose = AlvaARConnectorTHREE.Initialize(THREE);
+
+const criticalMissing = [];
+if (!dom.startBtn) criticalMissing.push('startBtn');
+if (!dom.stopBtn) criticalMissing.push('stopBtn');
+if (!dom.resetBtn) criticalMissing.push('resetBtn');
+if (!dom.threeCanvas) criticalMissing.push('three-canvas');
+if (!dom.cameraCanvas) criticalMissing.push('camera-canvas');
+if (criticalMissing.length)
+{
+  console.error('Missing DOM elements:', criticalMissing);
+  if (dom.status)
+  {
+    dom.status.textContent = `UI mismatch: missing ${criticalMissing.join(', ')}`;
+  }
+}
 
 const state = {
   started: false,
@@ -67,8 +83,6 @@ const state = {
   lastFpsSample: performance.now(),
   lastUiUpdate: 0
 };
-
-state.anchorFrame = computeTangentFrameFromUp(state.anchorUp);
 
 // Scene Map:
 // - mainCamera: third-person overview
@@ -442,7 +456,7 @@ class IMU
 
 function setStatus(text)
 {
-  dom.status.textContent = text;
+  if (dom.status) dom.status.textContent = text;
 }
 
 function onFrame(frameTickFn, fps = 30)
@@ -567,6 +581,8 @@ function computeTangentFrameFromUp(upVec)
 
   return { up, east, north, q };
 }
+
+state.anchorFrame = computeTangentFrameFromUp(state.anchorUp);
 
 function createPointCloud(maxPoints)
 {
@@ -969,11 +985,22 @@ async function setupPipeline()
     alpha: false,
     desynchronized: true,
     willReadFrequently: true
-  });
+  }) || state.slamCanvas.getContext('2d');
+
+  if (!state.slamCtx)
+  {
+    throw new Error('Unable to acquire 2D canvas context for SLAM.');
+  }
 
   dom.cameraCanvas.width = width;
   dom.cameraCanvas.height = height;
-  state.cameraCtx = dom.cameraCanvas.getContext('2d', { alpha: false, desynchronized: true });
+  state.cameraCtx = dom.cameraCanvas.getContext('2d', { alpha: false, desynchronized: true })
+    || dom.cameraCanvas.getContext('2d');
+
+  if (!state.cameraCtx)
+  {
+    throw new Error('Unable to acquire 2D canvas context for camera preview.');
+  }
 
   state.alva = await AlvaAR.Initialize(width, height, DEFAULT_FOV);
 
@@ -1021,12 +1048,14 @@ async function startExperience()
     state.started = true;
     dom.stopBtn.disabled = false;
     dom.resetBtn.disabled = false;
+    setStatus('Running');
 
     if (state.sphereMode)
     {
       tryAutoGpsAnchor();
     }
 
+    updateUI(performance.now());
     onFrame(renderFrame, TARGET_FPS);
   }
   catch (error)
@@ -1217,12 +1246,18 @@ window.addEventListener('resize', () =>
 
 // ---------- UI wiring ----------
 
-dom.startBtn.addEventListener('click', () => startExperience());
-dom.stopBtn.addEventListener('click', () => stopExperience());
-dom.resetBtn.addEventListener('click', () => resetTracking());
-dom.viewBtn.addEventListener('click', () => toggleView());
+function bind(el, event, handler)
+{
+  if (!el) return;
+  el.addEventListener(event, handler);
+}
 
-dom.imuToggle.addEventListener('change', async (event) =>
+bind(dom.startBtn, 'click', () => startExperience());
+bind(dom.stopBtn, 'click', () => stopExperience());
+bind(dom.resetBtn, 'click', () => resetTracking());
+bind(dom.viewBtn, 'click', () => toggleView());
+
+bind(dom.imuToggle, 'change', async (event) =>
 {
   if (event.target.checked)
   {
@@ -1235,9 +1270,9 @@ dom.imuToggle.addEventListener('change', async (event) =>
   }
 });
 
-dom.sphereBtn.addEventListener('click', () => toggleSphereMode());
+bind(dom.sphereBtn, 'click', () => toggleSphereMode());
 
-dom.pickBtn.addEventListener('click', () =>
+bind(dom.pickBtn, 'click', () =>
 {
   if (!state.sphereMode)
   {
@@ -1249,16 +1284,22 @@ dom.pickBtn.addEventListener('click', () =>
   applyAnchorTransform();
 });
 
-dom.gpsBtn.addEventListener('click', () => useGpsAnchor());
+bind(dom.gpsBtn, 'click', () => useGpsAnchor());
 
-dom.calBtn.addEventListener('click', () =>
+bind(dom.calBtn, 'click', () =>
 {
   if (state.imu) state.imu.calibrateYawOnce();
 });
 
-dom.calResetBtn.addEventListener('click', () =>
+bind(dom.calResetBtn, 'click', () =>
 {
   if (state.imu) state.imu.resetYawCalibration();
+});
+
+bind(dom.menuBtn, 'click', () =>
+{
+  const menu = document.getElementById('menu');
+  if (menu) menu.classList.toggle('collapsed');
 });
 
 // Canvas pointer for picking
@@ -1276,3 +1317,15 @@ dom.threeCanvas.addEventListener('pointerdown', (e) =>
 dom.viewBtn.textContent = 'First-person';
 dom.sphereBtn.textContent = state.sphereMode ? 'Back to plane' : 'Project to sphere';
 setStatus('Idle');
+
+window.addEventListener('error', (event) =>
+{
+  const msg = event && event.message ? event.message : 'Unknown error';
+  setStatus(`Error: ${msg}`);
+});
+
+window.addEventListener('unhandledrejection', (event) =>
+{
+  const msg = event && event.reason ? (event.reason.message || String(event.reason)) : 'Unhandled rejection';
+  setStatus(`Error: ${msg}`);
+});

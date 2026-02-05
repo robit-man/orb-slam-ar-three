@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <meta http-equiv="X-UA-Compatible" content="IE=edge" />
   <title>AlvaAR SLAM Playground</title>
+  <link rel="icon" href="data:,">
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -78,6 +79,14 @@
       background: rgba(255,174,0,.14);
       color: var(--fg);
     }
+    .btn.icon {
+      width: 38px;
+      padding: 9px 0;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      font-weight: 800;
+    }
     .btn:disabled {
       opacity: 0.45;
       cursor: not-allowed;
@@ -132,6 +141,8 @@
     .tiny { font-size: 11px; line-height: 1.25; }
     .muted { color: var(--muted); }
 
+    #menu.collapsed #panel { display: none; }
+
     #pip {
       position: fixed;
       right: calc(env(safe-area-inset-right) + 12px);
@@ -177,6 +188,7 @@
 
   <div id="menu">
     <div class="row">
+      <button id="menuBtn" class="btn icon" title="Expand / collapse menu">≡</button>
       <button id="startBtn" class="btn accent">Start</button>
       <button id="stopBtn" class="btn" disabled>Stop</button>
       <button id="resetBtn" class="btn" disabled>Reset</button>
@@ -230,6 +242,6 @@
     <canvas id="camera-canvas"></canvas>
   </div>
 
-  <script type="module" src="script.js"></script>
+  <script type="module" src="script.js?v=20260205a"></script>
 </body>
 </html>
