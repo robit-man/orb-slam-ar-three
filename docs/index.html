@@ -155,8 +155,12 @@
       border: 1px solid rgba(255,255,255,0.12);
       box-shadow: var(--shadow);
       z-index: 8;
-      pointer-events: none;
+      pointer-events: auto;
+      cursor: pointer;
     }
+    #pip.size-small { width: min(220px, 36vw); }
+    #pip.size-medium { width: min(320px, 42vw); }
+    #pip.size-large { width: min(440px, 56vw); }
     #pipLabel {
       position: absolute;
       left: 8px;
@@ -192,7 +196,7 @@
       <button id="startBtn" class="btn accent">Start</button>
       <button id="stopBtn" class="btn" disabled>Stop</button>
       <button id="resetBtn" class="btn" disabled>Reset</button>
-      <button id="viewBtn" class="btn" title="Toggle first-person view">First-person</button>
+      <button id="flashBtn" class="btn" title="Toggle flashlight">Flash: Off</button>
     </div>
 
     <div id="panel">
@@ -203,6 +207,7 @@
           <button id="sphereBtn" class="btn" title="Toggle plane/sphere projection">Project to sphere</button>
           <button id="pickBtn" class="btn" title="Pick an anchor point on the globe">Pick anchor</button>
           <button id="gpsBtn" class="btn" title="Use GPS to set anchor">Use GPS</button>
+          <button id="viewBtn" class="btn" title="Toggle first-person view">First-person</button>
         </div>
         <div class="tiny muted" style="margin-top:6px;">
           Sphere mode: up = (center → point). North = +Y pole projected to tangent plane.

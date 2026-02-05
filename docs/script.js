@@ -22,6 +22,7 @@ const dom = {
   startBtn: document.getElementById('startBtn'),
   stopBtn: document.getElementById('stopBtn'),
   resetBtn: document.getElementById('resetBtn'),
+  flashBtn: document.getElementById('flashBtn'),
   viewBtn: document.getElementById('viewBtn'),
   imuToggle: document.getElementById('imuToggle'),
   sphereBtn: document.getElementById('sphereBtn'),
@@ -35,7 +36,8 @@ const dom = {
   pts2d: document.getElementById('pts2d'),
   pts3d: document.getElementById('pts3d'),
   threeCanvas: document.getElementById('three-canvas'),
-  cameraCanvas: document.getElementById('camera-canvas')
+  cameraCanvas: document.getElementById('camera-canvas'),
+  pip: document.getElementById('pip')
 };
 
 const applyPose = AlvaARConnectorTHREE.Initialize(THREE);
@@ -81,7 +83,10 @@ const state = {
   fps: 0,
   frames: 0,
   lastFpsSample: performance.now(),
-  lastUiUpdate: 0
+  lastUiUpdate: 0,
+  lastVideoCheck: 0,
+  flashOn: false,
+  previewSize: 1
 };
 
 // Scene Map:
@@ -457,6 +462,22 @@ class IMU
 function setStatus(text)
 {
   if (dom.status) dom.status.textContent = text;
+}
+
+function setCameraAspect(width, height)
+{
+  if (!dom.pip || !width || !height) return;
+  dom.pip.style.aspectRatio = `${width} / ${height}`;
+}
+
+function setPreviewSize(index)
+{
+  if (!dom.pip) return;
+  const sizes = ['size-small', 'size-medium', 'size-large'];
+  const clamped = Math.max(0, Math.min(index, sizes.length - 1));
+  dom.pip.classList.remove(...sizes);
+  dom.pip.classList.add(sizes[clamped]);
+  state.previewSize = clamped;
 }
 
 function onFrame(frameTickFn, fps = 30)
@@ -909,6 +930,34 @@ function updateUI(now)
   dom.pts3d.textContent = `3D: ${pts3d || 0}`;
 }
 
+async function maybeResyncVideo(now)
+{
+  if (!state.media || !state.media.el) return false;
+  if (state.resizing) return false;
+  if (now - state.lastVideoCheck < 500) return false;
+
+  state.lastVideoCheck = now;
+  const vw = state.media.el.videoWidth | 0;
+  const vh = state.media.el.videoHeight | 0;
+  if (!vw || !vh) return false;
+
+  if (vw !== state.processWidth || vh !== state.processHeight)
+  {
+    state.resizing = true;
+    try
+    {
+      await setupPipeline();
+    }
+    finally
+    {
+      state.resizing = false;
+    }
+    return true;
+  }
+
+  return false;
+}
+
 function renderCameraFrame(points)
 {
   if (!state.cameraCtx || !state.media) return;
@@ -965,6 +1014,42 @@ async function ensureIMU(enabled)
   }
 }
 
+async function toggleFlashlight()
+{
+  if (!state.media || !state.media.stream)
+  {
+    setStatus('Flashlight: camera not ready.');
+    return;
+  }
+
+  const track = state.media.stream.getVideoTracks()[0];
+  if (!track)
+  {
+    setStatus('Flashlight: no video track.');
+    return;
+  }
+
+  const caps = (typeof track.getCapabilities === 'function') ? track.getCapabilities() : {};
+  if (!caps.torch)
+  {
+    setStatus('Flashlight not supported on this device.');
+    return;
+  }
+
+  state.flashOn = !state.flashOn;
+  try
+  {
+    await track.applyConstraints({ advanced: [{ torch: state.flashOn }] });
+    if (dom.flashBtn) dom.flashBtn.textContent = state.flashOn ? 'Flash: On' : 'Flash: Off';
+  }
+  catch (error)
+  {
+    state.flashOn = false;
+    if (dom.flashBtn) dom.flashBtn.textContent = 'Flash: Off';
+    setStatus(`Flash failed: ${error.message || error}`);
+  }
+}
+
 async function setupPipeline()
 {
   const video = state.media.el;
@@ -1001,6 +1086,8 @@ async function setupPipeline()
   {
     throw new Error('Unable to acquire 2D canvas context for camera preview.');
   }
+
+  setCameraAspect(width, height);
 
   state.alva = await AlvaAR.Initialize(width, height, DEFAULT_FOV);
 
@@ -1077,6 +1164,9 @@ function stopExperience()
     state.media.stop();
     state.media = null;
   }
+
+  state.flashOn = false;
+  if (dom.flashBtn) dom.flashBtn.textContent = 'Flash: Off';
 
   if (state.imu)
   {
@@ -1161,7 +1251,7 @@ function useGpsAnchor()
   );
 }
 
-function renderFrame(now)
+async function renderFrame(now)
 {
   if (!state.running || !state.alva || !state.slamCtx)
   {
@@ -1169,6 +1259,12 @@ function renderFrame(now)
   }
 
   if (state.resizing)
+  {
+    return true;
+  }
+
+  const resynced = await maybeResyncVideo(now);
+  if (resynced)
   {
     return true;
   }
@@ -1302,9 +1398,11 @@ bind(dom.menuBtn, 'click', () =>
   if (menu) menu.classList.toggle('collapsed');
 });
 
+bind(dom.flashBtn, 'click', () => toggleFlashlight());
+
 // Canvas pointer for picking
 
-dom.threeCanvas.addEventListener('pointerdown', (e) =>
+bind(dom.threeCanvas, 'pointerdown', (e) =>
 {
   if (state.sphereMode && (state.pickMode || e.shiftKey))
   {
@@ -1312,10 +1410,17 @@ dom.threeCanvas.addEventListener('pointerdown', (e) =>
   }
 });
 
+bind(dom.pip, 'click', () =>
+{
+  const next = (state.previewSize + 1) % 3;
+  setPreviewSize(next);
+});
+
 // Initial UI text
 
 dom.viewBtn.textContent = 'First-person';
 dom.sphereBtn.textContent = state.sphereMode ? 'Back to plane' : 'Project to sphere';
+setPreviewSize(state.previewSize);
 setStatus('Idle');
 
 window.addEventListener('error', (event) =>
