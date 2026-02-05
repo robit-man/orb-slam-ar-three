@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { AlvaAR } from './alva_ar.js';
 import { AlvaARConnectorTHREE } from './alva_ar_three.js';
 
@@ -72,7 +73,7 @@ const state = {
   processWidth: 0,
   processHeight: 0,
   view: null,
-  sphereMode: true,
+  sphereMode: false,
   pickMode: false,
   anchorUp: new THREE.Vector3(0, 1, 0),
   anchorFrame: null,
@@ -86,7 +87,26 @@ const state = {
   lastUiUpdate: 0,
   lastVideoCheck: 0,
   flashOn: false,
-  previewSize: 1
+  previewSize: 1,
+  gpsWatchId: null,
+  gpsSamples: [],
+  gpsAnchorEnabled: false,
+  gpsLastFix: null,
+  tune: {
+    slamWeight: 0.35,
+    accelInfluence: 0.85,
+    accelMin: 0.05,
+    accelMax: 1.5,
+    maxJump: 0.4,
+    smooth: 0.15
+  },
+  poseFilter: {
+    hasLast: false,
+    lastPos: new THREE.Vector3(),
+    filteredPos: new THREE.Vector3(),
+    delta: new THREE.Vector3(),
+    target: new THREE.Vector3()
+  }
 };
 
 // Scene Map:
@@ -397,9 +417,9 @@ class IMU
     const gy = (rate.gamma || 0) * deg2rad;
     const gz = (rate.alpha || 0) * deg2rad;
 
-    const ax = accel.x || 0;
-    const ay = accel.y || 0;
-    const az = accel.z || 0;
+    let ax = 0;
+    let ay = 0;
+    let az = 0;
 
     if (accelG && typeof accelG.x === 'number' && typeof accelG.y === 'number' && typeof accelG.z === 'number')
     {
@@ -408,12 +428,21 @@ class IMU
 
     if (accel && typeof accel.x === 'number' && typeof accel.y === 'number' && typeof accel.z === 'number')
     {
+      ax = accel.x;
+      ay = accel.y;
+      az = accel.z;
       this.acc = { x: ax, y: ay, z: az };
     }
     else if (this.accG)
     {
       const lin = computeLinearAccelFallbackFromAccG(this.accG, this.qRaw);
-      if (lin) this.acc = lin;
+      if (lin)
+      {
+        ax = lin.x;
+        ay = lin.y;
+        az = lin.z;
+        this.acc = lin;
+      }
     }
 
     const timestamp = Date.now();
@@ -470,6 +499,74 @@ function setCameraAspect(width, height)
   dom.pip.style.aspectRatio = `${width} / ${height}`;
 }
 
+function averageGpsUp(samples)
+{
+  if (!samples.length) return null;
+  const sum = new THREE.Vector3();
+  let wsum = 0;
+  for (const s of samples)
+  {
+    sum.addScaledVector(s.up, s.weight);
+    wsum += s.weight;
+  }
+  if (wsum <= 0) return null;
+  sum.multiplyScalar(1 / wsum);
+  if (sum.lengthSq() < 1e-12) return null;
+  return sum.normalize();
+}
+
+function applyGpsAnchorSmooth(upAvg, accuracy)
+{
+  if (!upAvg) return;
+  const alpha = accuracy ? Math.min(0.5, Math.max(0.08, 30 / accuracy)) : 0.15;
+  state.anchorUp.lerp(upAvg, alpha).normalize();
+  setAnchorFromUp(state.anchorUp);
+}
+
+function onGpsFix(pos)
+{
+  const c = pos.coords;
+  const up = latLonToUp(c.latitude, c.longitude);
+  const acc = Math.max(1, c.accuracy || 0);
+  const weight = 1 / acc;
+
+  state.gpsSamples.push({ up, weight });
+  if (state.gpsSamples.length > 12) state.gpsSamples.shift();
+  state.gpsLastFix = { lat: c.latitude, lon: c.longitude, acc };
+
+  if (state.sphereMode && state.gpsAnchorEnabled)
+  {
+    const avg = averageGpsUp(state.gpsSamples);
+    applyGpsAnchorSmooth(avg, acc);
+  }
+}
+
+function onGpsError(err)
+{
+  if (err && err.message)
+  {
+    setStatus(`GPS error: ${err.message}`);
+  }
+}
+
+function startGeolocation()
+{
+  if (!('geolocation' in navigator)) return;
+  if (state.gpsWatchId != null) return;
+  state.gpsWatchId = navigator.geolocation.watchPosition(
+    onGpsFix,
+    onGpsError,
+    { enableHighAccuracy: true, maximumAge: 500, timeout: 15000 }
+  );
+}
+
+function stopGeolocation()
+{
+  if (state.gpsWatchId == null) return;
+  try { navigator.geolocation.clearWatch(state.gpsWatchId); } catch (_) {}
+  state.gpsWatchId = null;
+}
+
 function setPreviewSize(index)
 {
   if (!dom.pip) return;
@@ -478,6 +575,69 @@ function setPreviewSize(index)
   dom.pip.classList.remove(...sizes);
   dom.pip.classList.add(sizes[clamped]);
   state.previewSize = clamped;
+}
+
+function clamp01(value)
+{
+  return Math.max(0, Math.min(1, value));
+}
+
+function resetPoseFilter()
+{
+  state.poseFilter.hasLast = false;
+  state.poseFilter.lastPos.set(0, 0, 0);
+  state.poseFilter.filteredPos.set(0, 0, 0);
+  state.poseFilter.delta.set(0, 0, 0);
+  state.poseFilter.target.set(0, 0, 0);
+}
+
+function filterPoseTranslation(rawPos)
+{
+  const filter = state.poseFilter;
+  if (!filter.hasLast)
+  {
+    filter.hasLast = true;
+    filter.lastPos.copy(rawPos);
+    filter.filteredPos.copy(rawPos);
+    return filter.filteredPos;
+  }
+
+  filter.delta.copy(rawPos).sub(filter.lastPos);
+  filter.lastPos.copy(rawPos);
+
+  const maxJump = Math.max(0, state.tune.maxJump);
+  const deltaLen = filter.delta.length();
+  if (maxJump > 0 && deltaLen > maxJump)
+  {
+    filter.delta.setLength(maxJump);
+  }
+
+  filter.target.copy(filter.filteredPos).add(filter.delta);
+
+  let accelGate = 0;
+  if (state.imu && state.imu.acc)
+  {
+    const ax = state.imu.acc.x || 0;
+    const ay = state.imu.acc.y || 0;
+    const az = state.imu.acc.z || 0;
+    const mag = Math.sqrt(ax * ax + ay * ay + az * az);
+    const denom = Math.max(0.0001, state.tune.accelMax - state.tune.accelMin);
+    accelGate = clamp01((mag - state.tune.accelMin) / denom);
+  }
+
+  const base = clamp01(state.tune.slamWeight);
+  const influence = clamp01(state.tune.accelInfluence);
+  const alpha = clamp01(base + accelGate * influence);
+
+  filter.filteredPos.lerp(filter.target, alpha);
+
+  const smooth = clamp01(state.tune.smooth);
+  if (smooth > 0)
+  {
+    filter.filteredPos.lerp(rawPos, smooth * 0.5);
+  }
+
+  return filter.filteredPos;
 }
 
 function onFrame(frameTickFn, fps = 30)
@@ -718,6 +878,12 @@ function createSceneView()
   mainCamera.position.set(0, 15, 15);
   mainCamera.lookAt(0, 1.2, 0);
 
+  const controls = new OrbitControls(mainCamera, dom.threeCanvas);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.08;
+  controls.minDistance = 2;
+  controls.maxDistance = 60;
+
   const trackedCamera = new THREE.PerspectiveCamera(DEFAULT_FOV, window.innerWidth / window.innerHeight, 0.01, 100);
 
   scene.add(new THREE.AmbientLight(0xffffff, 0.45));
@@ -785,6 +951,8 @@ function createSceneView()
     mainCamera,
     trackedCamera,
     activeCamera: mainCamera,
+    controls,
+    controlsTarget: new THREE.Vector3(),
     ground,
     grid,
     globe,
@@ -795,6 +963,7 @@ function createSceneView()
     cameraHelper,
     cameraMarker,
     phoneRig,
+    rawPosePos: new THREE.Vector3(),
     raycaster: new THREE.Raycaster(),
     pointerNdc: new THREE.Vector2()
   };
@@ -836,6 +1005,8 @@ function applyAnchorTransform()
     state.view.ground.visible = true;
     state.view.grid.visible = true;
   }
+
+  updateOrbitTarget();
 }
 
 function updateSlamCenter()
@@ -853,6 +1024,17 @@ function updateSlamCenter()
   }
 
   state.view.slamWorldGroup.position.copy(state.slamCenterSmooth).multiplyScalar(-1);
+  updateOrbitTarget();
+}
+
+function updateOrbitTarget()
+{
+  if (!state.view || !state.view.controls) return;
+  const target = state.view.controlsTarget;
+  target.copy(state.view.slamWorldGroup.position)
+    .applyQuaternion(state.view.anchorGroup.quaternion)
+    .add(state.view.anchorGroup.position);
+  state.view.controls.target.copy(target);
 }
 
 function pickAnchorFromClientXY(cx, cy)
@@ -893,6 +1075,8 @@ function updateLayout()
   state.view.mainCamera.updateProjectionMatrix();
   state.view.trackedCamera.aspect = w / h;
   state.view.trackedCamera.updateProjectionMatrix();
+
+  updateMenuSizing();
 }
 
 function updateFps(now)
@@ -928,6 +1112,12 @@ function updateUI(now)
   dom.pts2d.textContent = `2D: ${state.points2d || 0}`;
   const pts3d = state.view ? state.view.pointCloud.count : 0;
   dom.pts3d.textContent = `3D: ${pts3d || 0}`;
+
+  if (state.gpsLastFix && state.gpsAnchorEnabled)
+  {
+    const acc = Math.round(state.gpsLastFix.acc || 0);
+    dom.imuStatus.textContent += ` | gps ±${acc}m`;
+  }
 }
 
 async function maybeResyncVideo(now)
@@ -984,6 +1174,13 @@ function updatePhoneRig()
 
   state.view.phoneRig.group.quaternion.copy(state.imu.qDisp);
   updateAccelArrows(state.view.phoneRig.accelArrows, state.imu.acc);
+}
+
+function updatePhoneRigFromCamera()
+{
+  if (!state.view) return;
+  state.view.phoneRig.group.position.copy(state.view.trackedCamera.position);
+  state.view.phoneRig.group.quaternion.copy(state.view.trackedCamera.quaternion);
 }
 
 async function ensureIMU(enabled)
@@ -1097,6 +1294,7 @@ async function setupPipeline()
   }
 
   applyAnchorTransform();
+  updateOrbitTarget();
   updateLayout();
 }
 
@@ -1106,6 +1304,7 @@ function resetTracking()
 
   state.alva.reset();
   state.tracking = false;
+  resetPoseFilter();
 
   if (state.view)
   {
@@ -1131,16 +1330,19 @@ async function startExperience()
     await setupPipeline();
     await ensureIMU(dom.imuToggle.checked);
 
-    state.running = true;
-    state.started = true;
-    dom.stopBtn.disabled = false;
-    dom.resetBtn.disabled = false;
-    setStatus('Running');
+  state.running = true;
+  state.started = true;
+  dom.stopBtn.disabled = false;
+  dom.resetBtn.disabled = false;
+  setStatus('Running');
 
-    if (state.sphereMode)
-    {
-      tryAutoGpsAnchor();
-    }
+  startGeolocation();
+  state.gpsAnchorEnabled = false;
+
+  if (state.sphereMode)
+  {
+    tryAutoGpsAnchor();
+  }
 
     updateUI(performance.now());
     onFrame(renderFrame, TARGET_FPS);
@@ -1158,12 +1360,18 @@ function stopExperience()
   state.running = false;
   state.started = false;
   state.tracking = false;
+  resetPoseFilter();
 
   if (state.media)
   {
     state.media.stop();
     state.media = null;
   }
+
+  stopGeolocation();
+  state.gpsSamples.length = 0;
+  state.gpsAnchorEnabled = false;
+  state.gpsLastFix = null;
 
   state.flashOn = false;
   if (dom.flashBtn) dom.flashBtn.textContent = 'Flash: Off';
@@ -1188,11 +1396,13 @@ function toggleView()
   {
     state.view.activeCamera = state.view.trackedCamera;
     dom.viewBtn.textContent = 'Main view';
+    if (state.view.controls) state.view.controls.enabled = false;
   }
   else
   {
     state.view.activeCamera = state.view.mainCamera;
     dom.viewBtn.textContent = 'First-person';
+    if (state.view.controls) state.view.controls.enabled = true;
   }
 }
 
@@ -1203,11 +1413,14 @@ function toggleSphereMode()
   if (state.sphereMode)
   {
     setStatus('Sphere mode: ON. Up is radial.');
+    state.gpsAnchorEnabled = true;
     if (state.anchorUp) setAnchorFromUp(state.anchorUp);
+    tryAutoGpsAnchor();
   }
   else
   {
     setStatus('Sphere mode: OFF (plane).');
+    state.gpsAnchorEnabled = false;
   }
   applyAnchorTransform();
 }
@@ -1222,6 +1435,7 @@ function tryAutoGpsAnchor()
       const c = pos.coords;
       setAnchorFromUp(latLonToUp(c.latitude, c.longitude));
       setStatus(`Anchor set from GPS: ${c.latitude.toFixed(4)}, ${c.longitude.toFixed(4)}`);
+      state.gpsAnchorEnabled = true;
     },
     () => {},
     { enableHighAccuracy: true, maximumAge: 250, timeout: 15000 }
@@ -1235,6 +1449,9 @@ function useGpsAnchor()
     setStatus('GPS not available.');
     return;
   }
+
+  state.gpsAnchorEnabled = true;
+  state.gpsSamples.length = 0;
 
   navigator.geolocation.getCurrentPosition(
     (pos) =>
@@ -1300,9 +1517,13 @@ async function renderFrame(now)
     {
       state.tracking = true;
       applyPose(pose, state.view.trackedCamera.quaternion, state.view.trackedCamera.position);
+      state.view.rawPosePos.copy(state.view.trackedCamera.position);
+      const filtered = filterPoseTranslation(state.view.rawPosePos);
+      state.view.trackedCamera.position.copy(filtered);
       state.view.cameraHelper.update();
       state.view.cameraMarker.position.copy(state.view.trackedCamera.position);
       state.view.cameraMarker.quaternion.copy(state.view.trackedCamera.quaternion);
+      updatePhoneRigFromCamera();
 
       appendPointCloudFrom2D(
         state.view.pointCloud,
@@ -1322,7 +1543,14 @@ async function renderFrame(now)
 
     if (state.view)
     {
-      updatePhoneRig();
+      if (!pose && state.imu)
+      {
+        updatePhoneRig();
+      }
+      if (state.view.controls && state.view.activeCamera === state.view.mainCamera)
+      {
+        state.view.controls.update();
+      }
       state.view.renderer.render(state.view.scene, state.view.activeCamera);
     }
   }
@@ -1375,6 +1603,7 @@ bind(dom.pickBtn, 'click', () =>
     state.sphereMode = true;
     dom.sphereBtn.textContent = 'Back to plane';
   }
+  state.gpsAnchorEnabled = false;
   state.pickMode = true;
   setStatus('Pick mode: tap the globe (or hold Shift and tap).');
   applyAnchorTransform();
@@ -1422,6 +1651,46 @@ dom.viewBtn.textContent = 'First-person';
 dom.sphereBtn.textContent = state.sphereMode ? 'Back to plane' : 'Project to sphere';
 setPreviewSize(state.previewSize);
 setStatus('Idle');
+
+function updateMenuSizing()
+{
+  const menu = document.getElementById('menu');
+  if (!menu) return;
+  const headerRow = menu.querySelector('.row');
+  if (!headerRow) return;
+  const h = Math.ceil(headerRow.getBoundingClientRect().height);
+  if (h > 0)
+  {
+    menu.style.setProperty('--menu-head-h', `${h}px`);
+  }
+}
+
+updateMenuSizing();
+
+function bindTune(id, key, formatter)
+{
+  const input = document.getElementById(id);
+  const valueEl = document.getElementById(`${id}-value`);
+  if (!input) return;
+  input.value = state.tune[key];
+  const update = () =>
+  {
+    state.tune[key] = parseFloat(input.value);
+    if (valueEl)
+    {
+      valueEl.textContent = formatter ? formatter(state.tune[key]) : state.tune[key].toFixed(2);
+    }
+  };
+  input.addEventListener('input', update);
+  update();
+}
+
+bindTune('tune-slam-weight', 'slamWeight', v => v.toFixed(2));
+bindTune('tune-accel-influence', 'accelInfluence', v => v.toFixed(2));
+bindTune('tune-accel-min', 'accelMin', v => v.toFixed(2));
+bindTune('tune-accel-max', 'accelMax', v => v.toFixed(2));
+bindTune('tune-max-jump', 'maxJump', v => v.toFixed(2));
+bindTune('tune-smooth', 'smooth', v => v.toFixed(2));
 
 window.addEventListener('error', (event) =>
 {

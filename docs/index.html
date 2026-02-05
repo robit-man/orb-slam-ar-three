@@ -6,6 +6,8 @@
   <meta http-equiv="X-UA-Compatible" content="IE=edge" />
   <title>AlvaAR SLAM Playground</title>
   <link rel="icon" href="data:,">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -98,6 +100,8 @@
       border-radius: 12px;
       padding: 10px;
       box-shadow: var(--shadow);
+      max-height: calc(100dvh - 10rem);
+      overflow-y: auto;
     }
     .module {
       border: 1px solid var(--line);
@@ -140,6 +144,18 @@
     .toggle input { margin: 0; }
     .tiny { font-size: 11px; line-height: 1.25; }
     .muted { color: var(--muted); }
+
+    .tune-row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 6px;
+    }
+    .tune-row:last-child { margin-bottom: 0; }
+    .tune-label { font-size: 11px; color: var(--muted); }
+    .tune-value { font-size: 11px; min-width: 54px; text-align: right; }
+    .tune-row input[type=\"range\"] { width: 100%; }
 
     #menu.collapsed #panel { display: none; }
 
@@ -234,6 +250,45 @@
           <span class="pill" id="pts2d">2D: -</span>
           <span class="pill" id="pts3d">3D: -</span>
         </div>
+      </div>
+
+      <div class="module">
+        <div class="moduleTitle"><span>Tuneables</span><span class="muted">translation damping</span></div>
+        <div class="tune-row">
+          <div class="tune-label">SLAM weight</div>
+          <div class="tune-value" id="tune-slam-weight-value"></div>
+        </div>
+        <input id="tune-slam-weight" type="range" min="0" max="1" step="0.01" />
+
+        <div class="tune-row" style="margin-top:8px;">
+          <div class="tune-label">Accel influence</div>
+          <div class="tune-value" id="tune-accel-influence-value"></div>
+        </div>
+        <input id="tune-accel-influence" type="range" min="0" max="1" step="0.01" />
+
+        <div class="tune-row" style="margin-top:8px;">
+          <div class="tune-label">Accel min</div>
+          <div class="tune-value" id="tune-accel-min-value"></div>
+        </div>
+        <input id="tune-accel-min" type="range" min="0" max="1" step="0.01" />
+
+        <div class="tune-row" style="margin-top:8px;">
+          <div class="tune-label">Accel max</div>
+          <div class="tune-value" id="tune-accel-max-value"></div>
+        </div>
+        <input id="tune-accel-max" type="range" min="0.5" max="4" step="0.05" />
+
+        <div class="tune-row" style="margin-top:8px;">
+          <div class="tune-label">Max jump</div>
+          <div class="tune-value" id="tune-max-jump-value"></div>
+        </div>
+        <input id="tune-max-jump" type="range" min="0" max="2" step="0.05" />
+
+        <div class="tune-row" style="margin-top:8px;">
+          <div class="tune-label">Smoothing</div>
+          <div class="tune-value" id="tune-smooth-value"></div>
+        </div>
+        <input id="tune-smooth" type="range" min="0" max="0.5" step="0.01" />
       </div>
 
       <div class="tiny muted" style="margin-top:8px;">
